@@ -299,11 +299,11 @@ static int ecryptfs_i_size_read(struct dentry *dentry, struct inode *inode)
 	ecryptfs_put_lower_file(inode);
 	if (rc) {
 		rc = ecryptfs_read_and_validate_xattr_region(dentry, inode);
-		if (!rc)
-			crypt_stat->flags |= ECRYPTFS_METADATA_IN_XATTR;
+		if (rc)
+			return -EINVAL;
+		crypt_stat->flags |= ECRYPTFS_METADATA_IN_XATTR;
 	}
 
-	/* Must return 0 to allow non-eCryptfs files to be looked up, too */
 	return 0;
 }
 
@@ -349,11 +349,8 @@ static int ecryptfs_lookup_interpose(struct dentry *dentry,
 		return PTR_ERR(inode);
 	}
 	if (S_ISREG(inode->i_mode)) {
-		rc = ecryptfs_i_size_read(dentry, inode);
-		if (rc) {
-			make_bad_inode(inode);
-			return rc;
-		}
+		/* Errors ignored so non-eCryptfs files can be looked up, too */
+		ecryptfs_i_size_read(dentry, inode);
 	}
 
 	if (inode->i_state & I_NEW)
@@ -1057,15 +1054,30 @@ int ecryptfs_getattr_link(struct vfsmount *mnt, struct dentry *dentry,
 int ecryptfs_getattr(struct vfsmount *mnt, struct dentry *dentry,
 		     struct kstat *stat)
 {
+	struct inode *inode = dentry->d_inode;
 	struct kstat lower_stat;
 	int rc;
+
+	if (S_ISREG(inode->i_mode)) {
+		struct ecryptfs_crypt_stat *crypt_stat;
+
+		crypt_stat = &ecryptfs_inode_to_private(inode)->crypt_stat;
+		mutex_lock(&crypt_stat->cs_mutex);
+		if (!(crypt_stat->flags & ECRYPTFS_I_SIZE_INITIALIZED)) {
+			rc = ecryptfs_i_size_read(dentry, inode);
+			if (rc) {
+				mutex_unlock(&crypt_stat->cs_mutex);
+				return rc;
+			}
+		}
+		mutex_unlock(&crypt_stat->cs_mutex);
+	}
 
 	rc = vfs_getattr(ecryptfs_dentry_to_lower_mnt(dentry),
 			 ecryptfs_dentry_to_lower(dentry), &lower_stat);
 	if (!rc) {
-		fsstack_copy_attr_all(dentry->d_inode,
-				      ecryptfs_inode_to_lower(dentry->d_inode));
-		generic_fillattr(dentry->d_inode, stat);
+		fsstack_copy_attr_all(inode, ecryptfs_inode_to_lower(inode));
+		generic_fillattr(inode, stat);
 		stat->blocks = lower_stat.blocks;
 	}
 	return rc;
