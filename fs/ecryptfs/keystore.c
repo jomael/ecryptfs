@@ -27,6 +27,8 @@
 
 #include <crypto/hash.h>
 #include <crypto/skcipher.h>
+#include <keys/user-type.h>
+#include <keys/encrypted-type.h>
 #include <linux/string.h>
 #include <linux/pagemap.h>
 #include <linux/key.h>
@@ -452,6 +454,64 @@ static int ecryptfs_verify_version(u16 version)
 	}
 out:
 	return rc;
+}
+
+#if defined(CONFIG_ENCRYPTED_KEYS) || defined(CONFIG_ENCRYPTED_KEYS_MODULE)
+static inline struct ecryptfs_auth_tok *
+ecryptfs_get_encrypted_key_payload_data(struct key *key)
+{
+	struct encrypted_key_payload *payload;
+
+	if (key->type != &key_type_encrypted)
+		return NULL;
+
+	payload = key->payload.data[0];
+	if (!payload)
+		return ERR_PTR(-EKEYREVOKED);
+
+	if (payload->payload_datalen != sizeof(struct ecryptfs_auth_tok))
+		return ERR_PTR(-EINVAL);
+
+	return (struct ecryptfs_auth_tok *)payload->payload_data;
+}
+
+static inline struct key *ecryptfs_get_encrypted_key(char *sig)
+{
+	return request_key(&key_type_encrypted, sig, NULL);
+}
+
+#else
+static inline struct ecryptfs_auth_tok *
+ecryptfs_get_encrypted_key_payload_data(struct key *key)
+{
+	return NULL;
+}
+
+static inline struct key *ecryptfs_get_encrypted_key(char *sig)
+{
+	return ERR_PTR(-ENOKEY);
+}
+
+#endif /* CONFIG_ENCRYPTED_KEYS */
+
+static struct ecryptfs_auth_tok *
+ecryptfs_get_key_payload_data(struct key *key)
+{
+	struct ecryptfs_auth_tok *auth_tok;
+	struct user_key_payload *ukp;
+
+	auth_tok = ecryptfs_get_encrypted_key_payload_data(key);
+	if (auth_tok)
+		return auth_tok;
+
+	ukp = user_key_payload_locked(key);
+	if (!ukp)
+		return ERR_PTR(-EKEYREVOKED);
+
+	if (ukp->datalen != sizeof(struct ecryptfs_auth_tok))
+		return ERR_PTR(-EINVAL);
+
+	return (struct ecryptfs_auth_tok *)ukp->data;
 }
 
 /**
