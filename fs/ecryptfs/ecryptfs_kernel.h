@@ -93,6 +93,9 @@ ecryptfs_get_encrypted_key_payload_data(struct key *key)
 	if (!payload)
 		return ERR_PTR(-EKEYREVOKED);
 
+	if (payload->payload_datalen != sizeof(struct ecryptfs_auth_tok))
+		return ERR_PTR(-EINVAL);
+
 	return (struct ecryptfs_auth_tok *)payload->payload_data;
 }
 
@@ -128,6 +131,9 @@ ecryptfs_get_key_payload_data(struct key *key)
 	ukp = user_key_payload_locked(key);
 	if (!ukp)
 		return ERR_PTR(-EKEYREVOKED);
+
+	if (ukp->datalen != sizeof(struct ecryptfs_auth_tok))
+		return ERR_PTR(-EINVAL);
 
 	return (struct ecryptfs_auth_tok *)ukp->data;
 }
